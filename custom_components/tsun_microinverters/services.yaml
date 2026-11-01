@@ -1,0 +1,34 @@
+forecast_window:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: tsun_microinverters
+    day:
+      default: today
+      selector:
+        select:
+          options: [today, tomorrow]
+          translation_key: day
+    start:
+      required: true
+      example: "11:00"
+      selector:
+        time:
+    end:
+      required: true
+      example: "16:00"
+      selector:
+        time:
+refresh_forecast:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: tsun_microinverters
+reset_baseline:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: tsun_microinverters

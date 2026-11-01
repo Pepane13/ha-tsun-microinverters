@@ -1,0 +1,296 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Micro-onduleur TSUN",
+        "description": "Logger Solarman de l'onduleur (LSW), lu en local sur le port TCP 8899. Lecture seule : rien n'est jamais écrit dans l'onduleur.",
+        "data": {
+          "name": "Nom",
+          "host": "Adresse IP du logger",
+          "logger_sn": "Numéro de série du logger",
+          "skip_check": "Ajouter même si l'onduleur ne répond pas (nuit)"
+        },
+        "data_description": {
+          "logger_sn": "« Device serial number » à 10 chiffres, sur l'étiquette ou la page web du logger (pas le numéro de l'onduleur)."
+        }
+      },
+      "reconfigure": {
+        "title": "Adresse du logger",
+        "data": {
+          "host": "Adresse IP du logger"
+        }
+      }
+    },
+    "error": {
+      "invalid_ip": "Adresse IP invalide",
+      "invalid_sn": "Numéro de série du logger invalide (6 à 10 chiffres)",
+      "wrong_sn": "Le logger a répondu avec un autre numéro de série : vérifier le numéro sur son étiquette (pas celui de l'onduleur).",
+      "cannot_connect": "Logger injoignable sur le port 8899.",
+      "inverter_silent": "Le logger répond mais l'onduleur dort (nuit). Cocher la dernière case pour l'ajouter quand même."
+    },
+    "abort": {
+      "already_configured": "Ce logger est déjà configuré.",
+      "reconfigure_successful": "Adresse du logger mise à jour."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TSUN",
+        "sections": {
+          "reading": {
+            "name": "Lecture et communication",
+            "data": {
+              "poll_interval": "Intervalle d'interrogation",
+              "temp_offset": "Décalage de température",
+              "comm_alert_delay": "Alerte perte de communication après"
+            },
+            "data_description": {
+              "temp_offset": "Valeur soustraite au registre brut de température (40 selon la table TSUN).",
+              "comm_alert_delay": "Alerte si l'onduleur reste injoignable ce temps alors qu'il produisait (la veille de nuit est ignorée)."
+            }
+          },
+          "panels": {
+            "name": "Surveillance des panneaux",
+            "data": {
+              "underperf_mode": "Mode de détection",
+              "underperf_threshold": "Seuil de sous-performance",
+              "underperf_delay": "Durée minimale",
+              "underperf_min_power": "Puissance moyenne minimale",
+              "daily_threshold": "Seuil du bilan du soir"
+            },
+            "data_description": {
+              "underperf_mode": "Adaptatif : appris automatiquement. Chaque soir, chaque panneau doit avoir atteint au moins une fois dans la journée sa meilleure part habituelle de production ; les ombres récurrentes et saisonnières ne sont donc jamais signalées (alertes après 5 jours de soleil d'apprentissage). Simple : chaque panneau est comparé en temps réel à la moyenne des autres.",
+              "underperf_threshold": "Contrôle en temps réel : un panneau est sous-performant quand il produit ce pourcentage de moins que prévu : sa production habituelle à cette heure (mode adaptatif, cartes Flow seulement, sans notification) ou la moyenne des autres (mode simple, avec notification).",
+              "underperf_delay": "L'écart doit durer ce temps avant de déclencher le Flow (filtre les ombres passagères).",
+              "underperf_min_power": "Pas de contrôle sous cette puissance moyenne par panneau (aube, crépuscule, ciel très couvert).",
+              "daily_threshold": "Mode adaptatif : un panneau dont la meilleure part du jour est inférieure de ce pourcentage à sa meilleure part habituelle est signalé le soir (encrassement, câble, diode, vieillissement). Valeur minimale : elle s'élargit toute seule pour un panneau naturellement irrégulier."
+            }
+          },
+          "grid": {
+            "name": "Réseau et onduleur",
+            "data": {
+              "voltage_max": "Tension réseau maximale",
+              "voltage_min": "Tension réseau minimale",
+              "temp_alert": "Alerte température onduleur"
+            },
+            "data_description": {
+              "voltage_max": "Au-delà, un avertissement est journalisé (EN 50160 : 253 V). La surtension provoque des décrochages de l'onduleur."
+            }
+          },
+          "forecast": {
+            "name": "Prévision de production",
+            "data": {
+              "forecast_enabled": "Activer la prévision",
+              "forecast_tilt": "Inclinaison des panneaux",
+              "forecast_azimuth": "Orientation des panneaux",
+              "forecast_peak": "Puissance crête des panneaux",
+              "forecast_model": "Modèle météo"
+            },
+            "data_description": {
+              "forecast_enabled": "Prévision météo horaire de l'ensoleillement de vos panneaux (Open-Meteo, gratuit, sans compte), calibrée automatiquement sur ce que produit réellement votre installation. La position du Homey, arrondie à environ 1 km, est envoyée à api.open-meteo.com une fois par heure.",
+              "forecast_tilt": "0° = à plat, 90° = vertical. Un toit en tuiles courant fait 25 à 35°.",
+              "forecast_azimuth": "Direction vers laquelle les panneaux sont tournés : 90 = est, 135 = sud-est, 180 = sud, 225 = sud-ouest, 270 = ouest. Changer l'inclinaison, l'orientation ou la puissance crête relance le calibrage.",
+              "forecast_peak": "Total des panneaux (ex. 6 × 425 Wc = 2550). 0 = puissance nominale de l'onduleur. Ne sert que de point de départ : le calibrage le corrige après quelques jours de soleil.",
+              "forecast_model": "Meilleur choix : Open-Meteo combine les meilleurs modèles pour votre position. Météo-France (AROME/ARPEGE) est le plus précis en France."
+            }
+          },
+          "notifications": {
+            "name": "Notifications",
+            "data": {
+              "notify_comm": "Perte / retour de la communication",
+              "notify_panel": "Problèmes de panneaux",
+              "notify_alarm": "Alarmes onduleur, température et bridage",
+              "notify_grid": "Tension réseau hors plage",
+              "notify_service": "Envoyer aussi à (service notify)"
+            },
+            "data_description": {
+              "notify_service": "Facultatif, ex. notify.mobile_app_iphone. Une notification persistante est toujours créée."
+            }
+          }
+        },
+        "data": {
+          "reading": "Lecture et communication",
+          "panels": "Surveillance des panneaux",
+          "grid": "Réseau et onduleur",
+          "forecast": "Prévision de production",
+          "notifications": "Notifications"
+        }
+      }
+    }
+  },
+  "selector": {
+    "underperf_mode": {
+      "options": {
+        "adaptive": "Adaptatif (appris)",
+        "simple": "Simple (moyenne des autres)"
+      }
+    },
+    "forecast_model": {
+      "options": {
+        "best_match": "Meilleur choix (recommandé)",
+        "meteofrance_seamless": "Météo-France",
+        "icon_seamless": "DWD ICON (Allemagne)",
+        "ecmwf_ifs025": "ECMWF",
+        "gfs_seamless": "NOAA GFS"
+      }
+    },
+    "day": {
+      "options": {
+        "today": "Aujourd'hui",
+        "tomorrow": "Demain"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "power": {
+        "name": "Puissance"
+      },
+      "energy_today": {
+        "name": "Énergie aujourd'hui"
+      },
+      "energy_total": {
+        "name": "Énergie totale"
+      },
+      "status": {
+        "name": "Statut"
+      },
+      "voltage": {
+        "name": "Tension réseau"
+      },
+      "current": {
+        "name": "Courant réseau"
+      },
+      "frequency": {
+        "name": "Fréquence réseau"
+      },
+      "temperature": {
+        "name": "Température onduleur"
+      },
+      "dc_power": {
+        "name": "Puissance panneaux (DC)"
+      },
+      "efficiency": {
+        "name": "Rendement DC→AC"
+      },
+      "peak": {
+        "name": "Pic du jour"
+      },
+      "latency": {
+        "name": "Temps de réponse du logger"
+      },
+      "comm_rate": {
+        "name": "Taux de lectures réussies (1 h)"
+      },
+      "forecast_today": {
+        "name": "Prévision du jour"
+      },
+      "forecast_remaining": {
+        "name": "Prévision restante du jour"
+      },
+      "forecast_tomorrow": {
+        "name": "Prévision de demain"
+      },
+      "forecast_power": {
+        "name": "Puissance prévue (heure en cours)"
+      },
+      "forecast_mape": {
+        "name": "Erreur moyenne de prévision"
+      },
+      "panel_power": {
+        "name": "Puissance panneau {n}"
+      },
+      "panel_energy": {
+        "name": "Énergie panneau {n} aujourd'hui"
+      },
+      "panel_voltage": {
+        "name": "Tension panneau {n}"
+      },
+      "panel_current": {
+        "name": "Courant panneau {n}"
+      },
+      "panel_energy_total": {
+        "name": "Énergie totale panneau {n}"
+      },
+      "last_diag": {
+        "name": "Dernier diagnostic"
+      }
+    },
+    "binary_sensor": {
+      "producing": {
+        "name": "En production"
+      },
+      "alarm": {
+        "name": "Alarme onduleur"
+      },
+      "communication": {
+        "name": "Communication perdue"
+      },
+      "derating": {
+        "name": "Bridage thermique"
+      },
+      "any_underperforming": {
+        "name": "Un panneau sous-performe"
+      },
+      "panel_underperforming": {
+        "name": "Panneau {n} sous-performant"
+      },
+      "panel_not_producing": {
+        "name": "Panneau {n} ne produit pas"
+      }
+    },
+    "button": {
+      "refresh_forecast": {
+        "name": "Actualiser la prévision"
+      },
+      "reset_baseline": {
+        "name": "Réinitialiser le profil appris des panneaux"
+      }
+    }
+  },
+  "services": {
+    "forecast_window": {
+      "name": "Prévision d'énergie sur une plage horaire",
+      "description": "Production prévue (kWh) aujourd'hui ou demain entre deux heures locales. Échoue si la prévision est désactivée ou pas encore téléchargée.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Onduleur",
+          "description": "Utile seulement avec plusieurs onduleurs."
+        },
+        "day": {
+          "name": "Jour",
+          "description": "Jour"
+        },
+        "start": {
+          "name": "Début",
+          "description": "HH:MM"
+        },
+        "end": {
+          "name": "Fin",
+          "description": "HH:MM (00:00 = minuit)"
+        }
+      }
+    },
+    "refresh_forecast": {
+      "name": "Actualiser la prévision",
+      "description": "Télécharge la prévision météo maintenant.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Onduleur",
+          "description": "Utile seulement avec plusieurs onduleurs."
+        }
+      }
+    },
+    "reset_baseline": {
+      "name": "Réinitialiser le profil appris des panneaux",
+      "description": "Oublie le profil de production appris des panneaux ; réappris en quelques jours de soleil.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Onduleur",
+          "description": "Utile seulement avec plusieurs onduleurs."
+        }
+      }
+    }
+  }
+}

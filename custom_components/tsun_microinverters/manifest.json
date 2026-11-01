@@ -1,0 +1,23 @@
+{
+  "domain": "tsun_microinverters",
+  "name": "TSUN micro-inverters",
+  "codeowners": [
+    "@Pepane13"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "persistent_notification"
+  ],
+  "after_dependencies": [
+    "frontend",
+    "http",
+    "logbook",
+    "notify"
+  ],
+  "documentation": "https://github.com/Pepane13/ha-tsun-microinverters",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Pepane13/ha-tsun-microinverters/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}

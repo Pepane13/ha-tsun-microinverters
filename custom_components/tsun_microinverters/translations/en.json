@@ -1,0 +1,296 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TSUN micro-inverter",
+        "description": "Solarman logger of the inverter (LSW), read locally on TCP port 8899. Read-only: nothing is ever written to the inverter.",
+        "data": {
+          "name": "Name",
+          "host": "Logger IP address",
+          "logger_sn": "Logger serial number",
+          "skip_check": "Add even if the inverter does not answer (night)"
+        },
+        "data_description": {
+          "logger_sn": "10-digit 'Device serial number' on the logger's label or web page (not the inverter serial number)."
+        }
+      },
+      "reconfigure": {
+        "title": "Logger address",
+        "data": {
+          "host": "Logger IP address"
+        }
+      }
+    },
+    "error": {
+      "invalid_ip": "Invalid IP address",
+      "invalid_sn": "Invalid logger serial number (6 to 10 digits)",
+      "wrong_sn": "The logger answered with another serial number: check the number on its label (not the inverter one).",
+      "cannot_connect": "Logger unreachable on port 8899.",
+      "inverter_silent": "The logger answers but the inverter is asleep (night). Tick the last box to add it anyway."
+    },
+    "abort": {
+      "already_configured": "This logger is already configured.",
+      "reconfigure_successful": "Logger address updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TSUN",
+        "sections": {
+          "reading": {
+            "name": "Reading and communication",
+            "data": {
+              "poll_interval": "Polling interval",
+              "temp_offset": "Temperature offset",
+              "comm_alert_delay": "Communication loss alert after"
+            },
+            "data_description": {
+              "temp_offset": "Value subtracted from the raw temperature register (40 per TSUN documentation).",
+              "comm_alert_delay": "Alert when the inverter stays unreachable this long while it was producing (night standby is ignored)."
+            }
+          },
+          "panels": {
+            "name": "Panel monitoring",
+            "data": {
+              "underperf_mode": "Detection mode",
+              "underperf_threshold": "Underperformance threshold",
+              "underperf_delay": "Minimum duration",
+              "underperf_min_power": "Minimum average power",
+              "daily_threshold": "Day verdict threshold"
+            },
+            "data_description": {
+              "underperf_mode": "Adaptive: learned automatically. Each evening, each panel must have reached its usual best share of production at least once during the day; recurring and seasonal shadows are therefore never reported (alerts after 5 sunny days of learning). Simple: each panel is compared in real time with the average of the others.",
+              "underperf_threshold": "Real-time check: a panel is underperforming when it produces this much less than expected: its usual production at that time (adaptive mode, Flow cards only, no notification) or the average of the others (simple mode, with notification).",
+              "underperf_delay": "The gap must last this long before the Flow is triggered (filters passing shadows).",
+              "underperf_min_power": "No check below this average panel power (dawn, dusk, heavy clouds).",
+              "daily_threshold": "Adaptive mode: a panel whose best share of the day is this much below its usual best share is reported in the evening (dirt, cable, diode, ageing). Minimum value: it widens by itself for a naturally irregular panel."
+            }
+          },
+          "grid": {
+            "name": "Grid and inverter",
+            "data": {
+              "voltage_max": "Maximum grid voltage",
+              "voltage_min": "Minimum grid voltage",
+              "temp_alert": "Inverter temperature alert"
+            },
+            "data_description": {
+              "voltage_max": "Above this value a warning is logged (EN 50160: 253 V). Overvoltage makes inverters disconnect."
+            }
+          },
+          "forecast": {
+            "name": "Production forecast",
+            "data": {
+              "forecast_enabled": "Enable the forecast",
+              "forecast_tilt": "Panel tilt",
+              "forecast_azimuth": "Panel orientation",
+              "forecast_peak": "Peak power of the panels",
+              "forecast_model": "Weather model"
+            },
+            "data_description": {
+              "forecast_enabled": "Hourly weather forecast of the sunlight on your panels (Open-Meteo, free, no account), calibrated automatically on what your installation actually produces. The Homey location, rounded to about 1 km, is sent to api.open-meteo.com once an hour.",
+              "forecast_tilt": "0° = flat, 90° = vertical. A typical tiled roof is 25-35°.",
+              "forecast_azimuth": "Compass bearing the panels face: 90 = east, 135 = south-east, 180 = south, 225 = south-west, 270 = west. Changing the tilt, orientation or peak power restarts the calibration.",
+              "forecast_peak": "Total of the panels (e.g. 6 × 425 Wp = 2550). 0 = use the inverter rated power. Only sets the starting point: the calibration corrects it after a few sunny days.",
+              "forecast_model": "Best match: Open-Meteo picks the best models for your location. Météo-France (AROME/ARPEGE) is the most precise in France."
+            }
+          },
+          "notifications": {
+            "name": "Notifications",
+            "data": {
+              "notify_comm": "Communication lost / restored",
+              "notify_panel": "Panel problems",
+              "notify_alarm": "Inverter alarms, temperature and derating",
+              "notify_grid": "Grid voltage out of range",
+              "notify_service": "Also send to (notify service)"
+            },
+            "data_description": {
+              "notify_service": "Optional, e.g. notify.mobile_app_iphone. A persistent notification is always created."
+            }
+          }
+        },
+        "data": {
+          "reading": "Reading and communication",
+          "panels": "Panel monitoring",
+          "grid": "Grid and inverter",
+          "forecast": "Production forecast",
+          "notifications": "Notifications"
+        }
+      }
+    }
+  },
+  "selector": {
+    "underperf_mode": {
+      "options": {
+        "adaptive": "Adaptive (learned)",
+        "simple": "Simple (average of the others)"
+      }
+    },
+    "forecast_model": {
+      "options": {
+        "best_match": "Best match (recommended)",
+        "meteofrance_seamless": "Météo-France",
+        "icon_seamless": "DWD ICON (Germany)",
+        "ecmwf_ifs025": "ECMWF",
+        "gfs_seamless": "NOAA GFS"
+      }
+    },
+    "day": {
+      "options": {
+        "today": "Today",
+        "tomorrow": "Tomorrow"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "power": {
+        "name": "Power"
+      },
+      "energy_today": {
+        "name": "Energy today"
+      },
+      "energy_total": {
+        "name": "Energy total"
+      },
+      "status": {
+        "name": "Status"
+      },
+      "voltage": {
+        "name": "Grid voltage"
+      },
+      "current": {
+        "name": "Grid current"
+      },
+      "frequency": {
+        "name": "Grid frequency"
+      },
+      "temperature": {
+        "name": "Inverter temperature"
+      },
+      "dc_power": {
+        "name": "Panels power (DC)"
+      },
+      "efficiency": {
+        "name": "Efficiency DC→AC"
+      },
+      "peak": {
+        "name": "Peak today"
+      },
+      "latency": {
+        "name": "Logger response time"
+      },
+      "comm_rate": {
+        "name": "Read success rate (1 h)"
+      },
+      "forecast_today": {
+        "name": "Forecast today"
+      },
+      "forecast_remaining": {
+        "name": "Forecast remaining today"
+      },
+      "forecast_tomorrow": {
+        "name": "Forecast tomorrow"
+      },
+      "forecast_power": {
+        "name": "Forecast power (this hour)"
+      },
+      "forecast_mape": {
+        "name": "Forecast error (average)"
+      },
+      "panel_power": {
+        "name": "Panel {n} power"
+      },
+      "panel_energy": {
+        "name": "Panel {n} energy today"
+      },
+      "panel_voltage": {
+        "name": "Panel {n} voltage"
+      },
+      "panel_current": {
+        "name": "Panel {n} current"
+      },
+      "panel_energy_total": {
+        "name": "Panel {n} energy total"
+      },
+      "last_diag": {
+        "name": "Last diagnostic"
+      }
+    },
+    "binary_sensor": {
+      "producing": {
+        "name": "Producing"
+      },
+      "alarm": {
+        "name": "Inverter alarm"
+      },
+      "communication": {
+        "name": "Communication lost"
+      },
+      "derating": {
+        "name": "Thermal derating"
+      },
+      "any_underperforming": {
+        "name": "A panel is underperforming"
+      },
+      "panel_underperforming": {
+        "name": "Panel {n} underperforming"
+      },
+      "panel_not_producing": {
+        "name": "Panel {n} not producing"
+      }
+    },
+    "button": {
+      "refresh_forecast": {
+        "name": "Refresh forecast"
+      },
+      "reset_baseline": {
+        "name": "Reset learned panel profile"
+      }
+    }
+  },
+  "services": {
+    "forecast_window": {
+      "name": "Forecast energy in a time window",
+      "description": "Forecast production (kWh) of today or tomorrow between two local times. Fails when the forecast is off or not downloaded yet.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Only needed with several inverters."
+        },
+        "day": {
+          "name": "Day",
+          "description": "Day"
+        },
+        "start": {
+          "name": "Start",
+          "description": "HH:MM"
+        },
+        "end": {
+          "name": "End",
+          "description": "HH:MM (00:00 = midnight)"
+        }
+      }
+    },
+    "refresh_forecast": {
+      "name": "Refresh the forecast",
+      "description": "Downloads the weather forecast now.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Only needed with several inverters."
+        }
+      }
+    },
+    "reset_baseline": {
+      "name": "Reset the learned panel profile",
+      "description": "Forgets the learned production profile of the panels; relearned in a few sunny days.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Only needed with several inverters."
+        }
+      }
+    }
+  }
+}
