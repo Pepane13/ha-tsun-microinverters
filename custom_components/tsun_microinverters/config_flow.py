@@ -61,7 +61,7 @@ class TsunConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             errors, inverter_sn = await self._check(user_input)
-            if errors.get("base") == "inverter_silent" and user_input.get("skip_check"):
+            if errors.get("base") in ("inverter_silent", "cannot_connect") and user_input.get("skip_check"):
                 errors, inverter_sn = {}, None
             if not errors:
                 sn = str(user_input[CONF_LOGGER_SN]).strip()
@@ -94,7 +94,7 @@ class TsunConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             data = {**entry.data, CONF_HOST: str(user_input[CONF_HOST]).strip()}
             errors, inverter_sn = await self._check(data)
-            if errors.get("base") == "inverter_silent":
+            if errors.get("base") in ("inverter_silent", "cannot_connect"):
                 errors, inverter_sn = {}, entry.data.get(CONF_INVERTER_SN)
             if not errors:
                 return self.async_update_reload_and_abort(entry, data={**data, CONF_INVERTER_SN: inverter_sn or entry.data.get(CONF_INVERTER_SN)})

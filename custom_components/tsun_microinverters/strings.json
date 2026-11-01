@@ -8,7 +8,7 @@
           "name": "Name",
           "host": "Logger IP address",
           "logger_sn": "Logger serial number",
-          "skip_check": "Add even if the inverter does not answer (night)"
+          "skip_check": "Add even if the inverter does not answer (night, logger off)"
         },
         "data_description": {
           "logger_sn": "10-digit 'Device serial number' on the logger's label or web page (not the inverter serial number)."
@@ -25,7 +25,7 @@
       "invalid_ip": "Invalid IP address",
       "invalid_sn": "Invalid logger serial number (6 to 10 digits)",
       "wrong_sn": "The logger answered with another serial number: check the number on its label (not the inverter one).",
-      "cannot_connect": "Logger unreachable on port 8899.",
+      "cannot_connect": "Logger unreachable on port 8899. At night the logger built into the inverter is off: tick the last box to add it anyway.",
       "inverter_silent": "The logger answers but the inverter is asleep (night). Tick the last box to add it anyway."
     },
     "abort": {

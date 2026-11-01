@@ -45,6 +45,17 @@ async def test_config_flow(hass: HomeAssistant, fake) -> None:
     await hass.async_block_till_done()
 
 
+async def test_config_flow_logger_off_at_night(hass: HomeAssistant, fake) -> None:
+    await fake.stop()  # logger powered by the inverter: off at night
+    data = {"name": "TSUN", "host": "192.0.2.10", "logger_sn": str(SN)}
+    r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], data)
+    assert r["errors"] == {"base": "cannot_connect"}
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {**data, "skip_check": True})
+    assert r["type"] is FlowResultType.CREATE_ENTRY and r["data"]["inverter_serial"] is None
+    await hass.async_block_till_done()
+
+
 async def test_setup_entities_services(hass: HomeAssistant, fake) -> None:
     hass.config.language = "fr"
     entry = MockConfigEntry(domain=DOMAIN, unique_id=str(SN), title="TSUN",

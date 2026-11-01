@@ -16,7 +16,7 @@ from .const import DOMAIN, PLATFORMS
 from .coordinator import TsunCoordinator
 from .engine import EngineError
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 type TsunConfigEntry = ConfigEntry[TsunCoordinator]
 

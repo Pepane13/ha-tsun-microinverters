@@ -8,7 +8,7 @@
           "name": "Nom",
           "host": "Adresse IP du logger",
           "logger_sn": "Numéro de série du logger",
-          "skip_check": "Ajouter même si l'onduleur ne répond pas (nuit)"
+          "skip_check": "Ajouter même si l'onduleur ne répond pas (nuit, logger éteint)"
         },
         "data_description": {
           "logger_sn": "« Device serial number » à 10 chiffres, sur l'étiquette ou la page web du logger (pas le numéro de l'onduleur)."
@@ -25,7 +25,7 @@
       "invalid_ip": "Adresse IP invalide",
       "invalid_sn": "Numéro de série du logger invalide (6 à 10 chiffres)",
       "wrong_sn": "Le logger a répondu avec un autre numéro de série : vérifier le numéro sur son étiquette (pas celui de l'onduleur).",
-      "cannot_connect": "Logger injoignable sur le port 8899.",
+      "cannot_connect": "Logger injoignable sur le port 8899. La nuit, le logger intégré à l'onduleur est éteint : cocher la dernière case pour l'ajouter quand même.",
       "inverter_silent": "Le logger répond mais l'onduleur dort (nuit). Cocher la dernière case pour l'ajouter quand même."
     },
     "abort": {
