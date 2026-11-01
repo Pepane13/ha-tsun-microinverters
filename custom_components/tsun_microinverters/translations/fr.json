@@ -291,6 +291,20 @@
           "description": "Utile seulement avec plusieurs onduleurs."
         }
       }
+    },
+    "import_homey": {
+      "name": "Importer l'apprentissage de l'app Homey",
+      "description": "Reprend le calibrage de la prévision et le profil appris des panneaux depuis le rapport de diagnostic de l'app Homey (JSON).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Onduleur",
+          "description": "Utile seulement avec plusieurs onduleurs."
+        },
+        "report": {
+          "name": "Rapport",
+          "description": "Partie JSON du rapport de diagnostic Homey (ou une entrée de devices)."
+        }
+      }
     }
   }
 }

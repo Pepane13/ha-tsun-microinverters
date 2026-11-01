@@ -60,6 +60,8 @@ triggers:
 - `tsun_microinverters.forecast_window` (response): forecast kWh of `today`/`tomorrow` between `start` and `end`.
 - `tsun_microinverters.refresh_forecast`
 - `tsun_microinverters.reset_baseline`
+- `tsun_microinverters.import_homey`: takes over the forecast calibration and the learned panel profile from the Homey app
+  diagnostic report (JSON part). The report only holds per-hour summaries, so the import is close to the Homey state.
 
 ## Roof card
 

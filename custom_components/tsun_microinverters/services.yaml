@@ -32,3 +32,13 @@ reset_baseline:
       selector:
         config_entry:
           integration: tsun_microinverters
+import_homey:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: tsun_microinverters
+    report:
+      required: true
+      selector:
+        object:

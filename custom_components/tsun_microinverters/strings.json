@@ -291,6 +291,20 @@
           "description": "Only needed with several inverters."
         }
       }
+    },
+    "import_homey": {
+      "name": "Import learning from the Homey app",
+      "description": "Takes over the forecast calibration and the learned panel profile from the Homey app diagnostic report (JSON).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Only needed with several inverters."
+        },
+        "report": {
+          "name": "Report",
+          "description": "JSON part of the Homey diagnostic report (or one entry of devices)."
+        }
+      }
     }
   }
 }

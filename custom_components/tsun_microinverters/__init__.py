@@ -16,7 +16,7 @@ from .const import DOMAIN, PLATFORMS
 from .coordinator import TsunCoordinator
 from .engine import EngineError
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 type TsunConfigEntry = ConfigEntry[TsunCoordinator]
 
@@ -87,7 +87,22 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     hass.services.async_register(DOMAIN, "forecast_window", forecast_window, SCHEMA_WINDOW, supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "refresh_forecast", refresh_forecast, SCHEMA_ENTRY)
+    async def import_homey(call: ServiceCall) -> ServiceResponse:
+        c = _coordinator(hass, call)
+        assert c.engine is not None
+        report = call.data["report"]
+        devices = report.get("devices") if isinstance(report, dict) and "devices" in report else [report]
+        if not devices or not isinstance(devices[0], dict):
+            raise ServiceValidationError("No device in the Homey report")
+        res = c.engine.import_homey(devices[0])
+        c.refresh_values()
+        return res
+
     hass.services.async_register(DOMAIN, "reset_baseline", reset_baseline, SCHEMA_ENTRY)
+    hass.services.async_register(
+        DOMAIN, "import_homey", import_homey, vol.Schema({ENTRY: cv.string, vol.Required("report"): dict}),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     return True
 
 

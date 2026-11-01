@@ -417,3 +417,23 @@ def test_baseline_verdict_detects_defect_and_ignores_shadow():
     assert r["ready"] and all(p["state"] == "ok" for p in r["panels"])
     r = sunny_day(7, [1, 1, 1, 0.7, 1, 0.97], shadow_panel=2)
     assert r["panels"][3]["state"] == "new" and r["panels"][2]["state"] == "ok"
+
+
+def test_import_homey_report():
+    clock = Clock(ts("2026-11-01T20:00:00"))
+    e = Harness(FakeLogger(SN, {}), clock, options={"forecast_enabled": True}).e
+    device = {
+        "forecast": {"calibration": {"since": "2026-07-01", "samples": 900, "globalFactor": 0.81,
+                                     "hours": [{"hour": 12, "days": 90, "factor": 0.85}, {"hour": 8, "days": 60, "factor": 0.4}],
+                                     "accuracy": {"days": 80, "mape": 18.5, "bias": 3.1}}},
+        "baseline": {"since": "2026-07-01", "hours": [{"hour": 9, "ratios": [100, 95, 30, 98, 97, 96], "ready": True, "days": 40}],
+                     "daily": {"days": 100, "share": [101, 99, 80, 104, 107, 109]},
+                     "best": {"days": 95, "ref": [100, 98, 97, 99, 100, 99], "spread": [2.1, 2, 3, 1.5, 1, 1.2], "flagged": [0, 0, 0, 0, 0, 0]}},
+    }
+    res = e.import_homey(device)
+    assert res["forecast"]["hours"] == 2 and res["baseline"]["slots"] == 4
+    assert e.forecast.factor(12) == pytest.approx(0.85) and e.forecast.global_factor() == pytest.approx(0.81)
+    slot = PanelBaseline.slot_of(ts("2026-11-01T09:00:00"))
+    assert e.baseline.slots[slot]["r"][2] == 0.3 and e.baseline.ready(slot)
+    assert e.baseline.best["days"] == 95 and e.baseline.best["ref"][0] == 1.0
+    assert e.forecast.accuracy["mape"] == 18.5

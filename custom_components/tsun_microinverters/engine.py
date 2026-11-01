@@ -909,6 +909,74 @@ class TsunEngine:
     def baseline_summary(self) -> dict[str, Any]:
         return {"mode": "adaptive" if self.adaptive() else "simple", **self.baseline.summary(self.utc_offset_min())}
 
+    def import_homey(self, device: dict[str, Any]) -> dict[str, Any]:
+        """Seeds the learned state from a Homey app diagnostic report (one entry of `devices`).
+
+        The report only holds summaries: per-hour forecast factors and per-hour panel ratios
+        (average of the four 15-minute slots), so the import is close to, not identical to, the
+        Homey state. Learning goes on from there as usual.
+        """
+        from .panelbaseline import SLOT_MIN, SLOTS  # noqa: PLC0415
+
+        out: dict[str, Any] = {}
+        fc = (device.get("forecast") or {}).get("calibration")
+        if fc:
+            f = self.forecast
+            f.reset_calibration()
+            samples = int(fc.get("samples") or 0)
+            gf = float(fc.get("globalFactor") or 1)
+            if samples:
+                f.glob = {"a": gf, "r": 1.0, "n": samples}
+            for h in fc.get("hours") or []:
+                if h.get("factor") is None or not h.get("days"):
+                    continue
+                days = int(h["days"])
+                f.hours[int(h["hour"])] = {"a": float(h["factor"]), "r": 1.0, "n": days, "days": days, "last": None}
+            f.since = fc.get("since")
+            acc = fc.get("accuracy") or {}
+            if acc.get("days"):
+                f.accuracy = {"days": int(acc["days"]), "mape": acc.get("mape"), "bias": acc.get("bias"), "last": None}
+            out["forecast"] = {"samples": samples, "global_factor": gf, "hours": sum(1 for h in f.hours if h["n"])}
+            self._save("forecast", True)
+            self.forecast_publish()
+
+        bl = device.get("baseline")
+        if bl:
+            b = self.baseline
+            b.reset()
+            offset = self.utc_offset_min()
+            slots = 0
+            for h in bl.get("hours") or []:
+                ratios = h.get("ratios") or []
+                if len(ratios) != PANELS or all(r is None for r in ratios):
+                    continue
+                days = int(h.get("days") or 0)
+                first = round((((int(h["hour"]) * 60 - offset) % 1440) + 1440) % 1440 / SLOT_MIN)
+                for k in range(4):
+                    b.slots[(first + k) % SLOTS] = {
+                        "r": [None if r is None else r / 100 for r in ratios],
+                        "n": max(days * 30, 1), "days": days, "last": None, "peak": None, "peakDay": None,
+                    }
+                    slots += 1
+            daily = bl.get("daily") or {}
+            if isinstance(daily.get("share"), list) and len(daily["share"]) == PANELS:
+                b.daily = {"share": [x / 100 for x in daily["share"]], "days": int(daily.get("days") or 0)}
+            best = bl.get("best") or {}
+            if isinstance(best.get("ref"), list) and len(best["ref"]) == PANELS:
+                b.best = {
+                    "ref": [None if x is None else x / 100 for x in best["ref"]],
+                    "spread": [float(x or 0) for x in best.get("spread") or [0] * PANELS],
+                    "days": int(best.get("days") or 0),
+                    "flagged": [int(x or 0) for x in best.get("flagged") or [0] * PANELS],
+                    "last": None,
+                }
+            b.since = bl.get("since")
+            out["baseline"] = {"slots": slots, "daily_days": b.daily["days"], "best_days": b.best["days"]}
+            self._save("baseline", True)
+
+        self._diag("info", "app", f"Homey import: {out}")
+        return out
+
     def reset_baseline(self) -> None:
         self.baseline.reset()
         for w in self.panel_watch:
