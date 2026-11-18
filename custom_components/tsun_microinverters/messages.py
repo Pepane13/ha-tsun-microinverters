@@ -83,6 +83,7 @@ MESSAGES = {'en': {'status': {'normal': 'Normal',
                  'forecast_day_dull': 'Forecast of {day} (made the day before): {forecast} kWh, produced {actual} kWh (day too dull to '
                                       'assess the accuracy)',
                  'forecast_recalibrate': 'Panel plane or peak power changed: forecast calibration restarted',
+                 'forecast_models': 'Weather model comparison for {day} (forecast made the evening before): produced {actual} kWh; {details}',
                  'counter_back': "The inverter daily counter went back to {raw} kWh (evening restart of the inverter): the day's yield "
                                  '{kept} kWh is kept',
                  'standby_start': 'Inverter not answering since the app started: considered in night standby (end of production time not '
@@ -205,6 +206,7 @@ MESSAGES = {'en': {'status': {'normal': 'Normal',
                  'forecast_day_dull': 'Prévision du {day} (faite la veille) : {forecast} kWh, produit {actual} kWh (journée trop sombre '
                                       'pour évaluer la précision)',
                  'forecast_recalibrate': 'Plan des panneaux ou puissance crête modifié : calibrage de la prévision relancé',
+                 'forecast_models': 'Comparaison des modèles météo pour le {day} (prévision faite la veille au soir) : produit {actual} kWh ; {details}',
                  'counter_back': "Le compteur du jour de l'onduleur est revenu à {raw} kWh (redémarrage de l'onduleur en fin de journée) : "
                                  'la production du jour {kept} kWh est conservée',
                  'standby_start': "Onduleur muet depuis le démarrage de l'app : considéré en veille de nuit (heure de fin de production "

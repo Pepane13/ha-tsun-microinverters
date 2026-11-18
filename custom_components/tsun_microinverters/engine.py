@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .forecast import HOUR_S, SolarForecast, build_url, local_parts, next_day, parse_time
+from .forecast import COMPARE_MODELS, HOUR_S, SolarForecast, build_url, local_parts, next_day, parse_time
 from .messages import t as translate
 from .mx3000d import RETRY_DELAY_S, read_all
 from .panelbaseline import ACCEPT_DAYS, BEST_MIN_DAYS, DAILY_MIN_DAYS, PanelBaseline
@@ -996,7 +996,7 @@ class TsunEngine:
         peak = self.num("forecast_peak", 0) or rated
         return {"peak_kw": peak / 1000, "rated_kw": rated / 1000, "tz": self.tz}
 
-    def forecast_request(self) -> tuple[str, dict[str, str]]:
+    def forecast_request(self, model: str | None = None) -> tuple[str, dict[str, str]]:
         if not self.location or not all(isinstance(x, (int, float)) for x in self.location) or self.location == (0, 0):
             raise EngineError(self._t("diag.forecast_no_location"))
         tilt = self.opt("forecast_tilt")
@@ -1004,7 +1004,7 @@ class TsunEngine:
         return build_url(
             self.location[0], self.location[1],
             float(tilt) if tilt is not None else 30, float(azimuth) if azimuth is not None else 180,
-            self.opt("forecast_model") or "best_match",
+            model or self.opt("forecast_model") or "best_match",
         )
 
     async def fetch_forecast(self, get_json: Callable[[str, dict[str, str]], Awaitable[dict]]) -> float:
@@ -1031,6 +1031,7 @@ class TsunEngine:
                 remaining=dash if v["remaining"] is None else v["remaining"], tomorrow=dash if v["tomorrow"] is None else v["tomorrow"]))
             if None not in (v["today"], v["remaining"], v["tomorrow"]):
                 self._fire("forecast_updated", {"today": v["today"], "remaining": v["remaining"], "tomorrow": v["tomorrow"]})
+            await self._compare_models(get_json, now)
             self._save("forecast", True)
         except Exception as err:  # noqa: BLE001 - network, HTTP or parse error
             self.forecast_error = {"t": datetime.fromtimestamp(self.now()).astimezone().isoformat(), "message": str(err)}
@@ -1038,7 +1039,25 @@ class TsunEngine:
             self.forecast_publish(self.now())
         return (FORECAST_REFRESH_MIN if success else FORECAST_RETRY_MIN) * 60
 
+    async def _compare_models(self, get_json: Callable[[str, dict[str, str]], Awaitable[dict]], now: float) -> None:
+        """Once a day after 18:00, records tomorrow's total for each comparison weather model
+        (same calibration), to rank the models against the measured production."""
+        ctx = self.forecast_ctx()
+        lp = local_parts(now, ctx["tz"])
+        tomorrow = next_day(lp["day"])
+        if lp["hour"] < 18 or self.forecast.compare_done == tomorrow:
+            return
+        self.forecast.compare_done = tomorrow
+        for model in COMPARE_MODELS:
+            try:
+                url, params = self.forecast_request(model)
+                series = SolarForecast.parse(await get_json(url, params))
+                self.forecast.record_model_ahead(model, tomorrow, self.forecast.day_total(tomorrow, ctx, series))
+            except Exception as err:  # noqa: BLE001 - one model failing must not stop the others
+                self._diag("debug", "forecast", f"Model comparison {model}: {err}")
+
     def forecast_values(self, now: float | None = None) -> dict[str, float | None]:
+        """Today = energy produced so far + corrected remaining forecast (past hours are not re-forecast)."""
         now = self.now() if now is None else now
         ctx = self.forecast_ctx()
         today = local_parts(now, ctx["tz"])["day"]
@@ -1046,17 +1065,21 @@ class TsunEngine:
         def r(x: float | None, d: int = 2) -> float | None:
             return None if x is None else round(x, d)
 
+        ratio = self.forecast.intraday_ratio(now, ctx)
+        remaining = self.forecast.remaining(now, ctx, ratio)
+        produced = float(self.values.get("energy_today") or 0)
         return {
-            "today": r(self.forecast.day_total(today, ctx)),
-            "remaining": r(self.forecast.remaining(now, ctx)),
+            "today": r(None if remaining is None else produced + remaining),
+            "remaining": r(remaining),
             "tomorrow": r(self.forecast.day_total(next_day(today), ctx)),
-            "power": r(self.forecast.power_at(now, ctx), 0),
+            "power": r(self.forecast.power_at(now, ctx, ratio), 0),
+            "ratio": r(ratio),
         }
 
     def forecast_publish(self, now: float | None = None) -> dict[str, float | None]:
         v = self.forecast_values(now)
         if self.forecast_enabled():
-            for k in ("today", "remaining", "tomorrow", "power"):
+            for k in ("today", "remaining", "tomorrow", "power", "ratio"):
                 self.values[f"forecast_{k}"] = v[k]
             acc = self.forecast.accuracy
             self.values["forecast_mape"] = None if acc["mape"] is None else round(acc["mape"], 1)
@@ -1072,6 +1095,7 @@ class TsunEngine:
             consecutive = bool(m) and m["hourStart"] == hour_start - HOUR_S
             if consecutive and m["valid"]:
                 delta = value - m["value"] if value >= m["value"] else value
+                self.forecast.record_actual(m["hourStart"], delta, self.forecast_ctx())
                 res = self.forecast.learn_hour(m["hourStart"], delta, self.forecast_ctx())
                 if res["learned"]:
                     self._diag("debug", "forecast", self._t(
@@ -1089,6 +1113,13 @@ class TsunEngine:
         if not self.forecast_enabled():
             return
         actual = float(self.values.get("energy_today") or 0)
+        models = self.forecast.check_models(day, actual)
+        if models:
+            details = ", ".join(
+                f"{m['model']} {m['forecast']} kWh" + ("" if m["error"] is None else f" ({'+' if m['error'] > 0 else ''}{m['error']} %)")
+                for m in models)
+            self._diag("info", "forecast", self._t("diag.forecast_models", day=day, actual=rnd(actual, 2), details=details))
+            self._save("forecast", True)
         res = self.forecast.check_day(day, actual)
         if not res:
             return
@@ -1104,7 +1135,7 @@ class TsunEngine:
     def forecast_status(self, now: float | None = None) -> dict[str, Any]:
         v = self.forecast_values(now)
         s = self.forecast.summary()
-        return {**{k: v[k] for k in ("today", "remaining", "tomorrow")}, "error": self.forecast_error, **s}
+        return {**{k: v[k] for k in ("today", "remaining", "tomorrow")}, "intraday_ratio": v["ratio"], "error": self.forecast_error, **s}
 
     def forecast_window(self, day: str, start: str, end: str) -> float:
         if not self.forecast_enabled():

@@ -394,6 +394,94 @@ def test_forecast_day_accuracy():
     assert res["error"] == 25 and f.accuracy["days"] == 1
 
 
+def _sky_series(start: float, cloud: float, gti: float = 600, hours: int = 48) -> list[dict]:
+    return [{"t": start + i * 3600, "gti": gti if 8 <= local_parts(start + i * 3600, TZ)["hour"] <= 16 else 0,
+             "temp": 15, "cloud": cloud} for i in range(hours)]
+
+
+CTX = {"peak_kw": 3.6, "rated_kw": 3.0, "tz": TZ}
+
+
+def test_forecast_sky_class_factors_split_clear_and_overcast():
+    f = SolarForecast()
+    day0 = ts("2026-11-01T00:00:00")
+    for d in range(14):  # alternate sunny and overcast days at 12:00 (7 learned days each)
+        cloud = 10 if d % 2 == 0 else 90
+        start = day0 + d * 86400
+        f.set_series(_sky_series(start, cloud), start)
+        hs = start + 12 * 3600
+        raw = f.raw(f.entry_at(hs), 3.6)
+        f.learn_hour(hs, raw * (1.0 if cloud == 10 else 0.3), CTX)
+    # one factor per hour averages both skies; the sky classes keep them apart
+    assert 0.4 < f.factor(12) < 0.9
+    assert f.factor(12, 0) == pytest.approx(1.0, abs=0.05) and f.factor(12, 2) == pytest.approx(0.3, abs=0.05)
+    s = f.summary()["sky_factors"]
+    assert s[0]["hour"] == 12 and set(s[0]) == {"hour", "clear", "overcast"}
+    # round trip keeps the sky calibration
+    g = SolarForecast(f.to_json())
+    assert g.factor(12, 2) == pytest.approx(f.factor(12, 2), abs=1e-3)
+
+
+def test_forecast_parse_reads_cloud_cover():
+    js = fake_open_meteo(ts("2026-06-21T00:00:00"), 3)
+    js["hourly"]["cloud_cover"] = [5, 50, 95]
+    series = SolarForecast.parse(js)
+    assert [e["cloud"] for e in series] == [5, 50, 95]
+
+
+def test_forecast_intraday_ratio_corrects_remaining():
+    f = SolarForecast()
+    day0 = ts("2026-11-18T00:00:00")
+    f.set_series(_sky_series(day0, 20), day0)
+    now = day0 + 12 * 3600 + 600
+    full = f.remaining(now, CTX)
+    for h in (9, 10, 11):  # morning produced 40 % of the forecast
+        hs = day0 + h * 3600
+        f.record_actual(hs, 0.4 * f.energy(f.entry_at(hs), CTX), CTX)
+    ratio = f.intraday_ratio(now, CTX)
+    assert ratio == pytest.approx(0.4, abs=1e-3)
+    corrected = f.remaining(now, CTX, ratio)
+    assert 0.4 * full < corrected < full
+    assert SolarForecast.correction(0.4, 0) == pytest.approx(0.4)
+    assert SolarForecast.correction(0.4, 3) == pytest.approx(0.7)
+    assert f.intraday_ratio(now + 86400, CTX) is None  # another day: no correction
+    assert SolarForecast.correction(None, 0) == 1.0
+
+
+def test_forecast_today_is_produced_plus_remaining():
+    clock = Clock(ts("2026-11-18T17:30:00"))
+    e = Harness(FakeLogger(SN, {}), clock, options={"forecast_enabled": True}).e
+    day0 = ts("2026-11-18T00:00:00")
+    e.forecast.set_series(_sky_series(day0, 50), day0)
+    e.values["energy_today"] = 3.58
+    v = e.forecast_values()
+    assert v["remaining"] == 0 and v["today"] == 3.58
+    clock.t = ts("2026-11-18T05:00:00")
+    e.values["energy_today"] = 0
+    v = e.forecast_values()
+    assert v["today"] == v["remaining"] > 0
+
+
+def test_forecast_model_comparison():
+    clock = Clock(ts("2026-11-18T19:10:00"))
+    e = Harness(FakeLogger(SN, {}), clock, options={"forecast_enabled": True}).e
+    e.location = (45.0, 1.0)
+    calls = []
+
+    async def get_json(url, params):
+        calls.append(params.get("models"))
+        return fake_open_meteo(ts("2026-11-17T00:00:00"))
+
+    run(e.fetch_forecast(get_json))
+    run(e.fetch_forecast(get_json))  # second refresh the same evening: no new comparison
+    assert calls.count("icon_seamless") == 1 and calls.count("ecmwf_ifs025") == 1
+    assert set(e.forecast.models) == {"meteofrance_seamless", "icon_seamless", "ecmwf_ifs025"}
+    fc = e.forecast.models["icon_seamless"]["ahead"]["2026-11-19"]
+    res = e.forecast.check_models("2026-11-19", fc / 2)
+    assert {r["model"] for r in res} == set(e.forecast.models) and res[0]["error"] == pytest.approx(100, abs=0.5)
+    assert e.forecast.summary()["models"]["icon_seamless"]["days"] == 1
+
+
 # ---------- Panel baseline (adaptive day verdict) ----------
 
 def test_baseline_verdict_detects_defect_and_ignores_shadow():

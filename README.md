@@ -24,7 +24,10 @@ Nothing is ever written to the inverter: only Modbus function 0x03 (read holding
   - *simple*: each panel compared with the average of the others;
   - "not producing" detection in both modes, with a hint from the panel voltage.
 - **Production forecast** (optional): hourly irradiance on the panel plane from Open-Meteo (free, no account; location rounded
-  to about 1 km), calibrated hour by hour on the measured production; today, remaining, tomorrow, current hour; day-ahead accuracy.
+  to about 1 km), calibrated hour by hour on the measured production, with separate factors for clear, variable and
+  overcast hours (forecast cloud cover); today (= produced so far + remaining), remaining corrected by the measured / forecast
+  ratio of the last hours, tomorrow, current hour; day-ahead accuracy, and a daily comparison of three weather models
+  (Météo-France, ICON, ECMWF) in the log and the diagnostics.
 - **Daily summary** in the log at midnight.
 - **Diagnostics** download (serial numbers masked) and a *Last diagnostic* sensor with the recent journal.
 - **Roof card** (`custom:tsun-roof-card`), loaded automatically: live panels laid out as on the roof.
