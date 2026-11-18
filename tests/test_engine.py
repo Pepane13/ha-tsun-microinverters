@@ -465,7 +465,7 @@ def test_forecast_today_is_produced_plus_remaining():
 def test_forecast_model_comparison():
     clock = Clock(ts("2026-11-18T19:10:00"))
     e = Harness(FakeLogger(SN, {}), clock, options={"forecast_enabled": True}).e
-    e.location = (43.4, 5.35)
+    e.location = (45.0, 1.0)
     calls = []
 
     async def get_json(url, params):
