@@ -4,6 +4,11 @@ Input: hourly global tilted irradiance (GTI, W/m², mean over the hour) on the p
 air temperature (Open-Meteo). Raw model per hour: E = GTI/1000 x kWp x 0.85 x temperature factor.
 Calibration: for each local hour of the day, a factor = moving average of measured energy /
 moving average of raw energy, blended with the global factor until the hour has 7 learned days.
+Since 1.1.0 the hour factor is refined per sky class of the forecast (cloud cover: clear < 30 %,
+variable 30-70 %, overcast > 70 %), blended with the hour factor until the class has 7 learned days:
+a weather model's cloud error then no longer averages sunny and overcast days into one factor.
+Intraday: the ratio measured / forecast over the last completed hours of the day corrects the
+remaining forecast (bounded, decaying towards 1 with the horizon).
 AC output capped at the inverter rated power. Timestamps are POSIX seconds.
 """
 
@@ -30,6 +35,14 @@ FACTOR_MAX = 2.5
 ACCURACY_MIN_KWH = 1
 ACCURACY_ALPHA_MIN = 0.1
 SERIES_MAX_AGE_S = 2 * 24 * HOUR_S
+SKY_CLEAR_MAX = 30
+SKY_OVERCAST_MIN = 70
+SKY_NAMES = ("clear", "variable", "overcast")
+INTRADAY_HOURS = 3
+INTRADAY_MIN_KWH = 0.15
+INTRADAY_MIN = 0.3
+INTRADAY_MAX = 1.5
+INTRADAY_HALF_LIFE_H = 3
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -69,6 +82,37 @@ def _empty_hour() -> dict[str, Any]:
     return {"a": 0.0, "r": 0.0, "n": 0, "days": 0, "last": None}
 
 
+def _empty_sky() -> list[list[dict[str, Any]]]:
+    return [[_empty_hour() for _ in SKY_NAMES] for _ in range(24)]
+
+
+def sky_class(entry: dict[str, Any] | None) -> int | None:
+    """0 clear, 1 variable, 2 overcast, None when the cloud cover is unknown."""
+    cloud = entry.get("cloud") if entry else None
+    if not isinstance(cloud, (int, float)):
+        return None
+    if cloud < SKY_CLEAR_MAX:
+        return 0
+    return 1 if cloud <= SKY_OVERCAST_MIN else 2
+
+
+def _ema_update(acc: dict[str, Any], actual: float, raw: float, alpha_min: float, day: str | None = None) -> None:
+    acc["n"] += 1
+    a = max(1 / acc["n"], alpha_min)
+    acc["a"] += a * (actual - acc["a"])
+    acc["r"] += a * (raw - acc["r"])
+    if day is not None and acc.get("last") != day:
+        acc["days"] += 1
+        acc["last"] = day
+
+
+def _accuracy_update(acc: dict[str, Any], err: float) -> None:
+    acc["days"] += 1
+    a = max(1 / acc["days"], ACCURACY_ALPHA_MIN)
+    acc["mape"] = abs(err) if acc["mape"] is None else acc["mape"] + a * (abs(err) - acc["mape"])
+    acc["bias"] = err if acc["bias"] is None else acc["bias"] + a * (err - acc["bias"])
+
+
 class SolarForecast:
     def __init__(self, data: dict | None = None) -> None:
         self.reset()
@@ -81,6 +125,14 @@ class SolarForecast:
                 self.accuracy = {**self.accuracy, **data["accuracy"]}
             if isinstance(data.get("dayAhead"), dict):
                 self.day_ahead = dict(data["dayAhead"])
+            sky = data.get("sky")
+            if isinstance(sky, list) and len(sky) == 24 and all(isinstance(h, list) and len(h) == len(SKY_NAMES) for h in sky):
+                self.sky = [[{**_empty_hour(), **c} for c in h] for h in sky]
+            if isinstance(data.get("todayActual"), dict):
+                self.today_actual = {"day": data["todayActual"].get("day"), "hours": dict(data["todayActual"].get("hours") or {})}
+            if isinstance(data.get("models"), dict):
+                self.models = {k: {**_empty_model(), **v} for k, v in data["models"].items() if isinstance(v, dict)}
+            self.compare_done = data.get("compareDone")
             if isinstance(data.get("series"), list):
                 self.series = [e for e in data["series"] if e and isinstance(e.get("t"), (int, float))]
             self.fetched_at = data.get("fetchedAt")
@@ -92,9 +144,13 @@ class SolarForecast:
         self.fetched_at: float | None = None
         self.day_ahead: dict[str, float] = {}
         self.accuracy = {"days": 0, "mape": None, "bias": None, "last": None}
+        self.today_actual: dict[str, Any] = {"day": None, "hours": {}}
+        self.models: dict[str, dict[str, Any]] = {}
+        self.compare_done: str | None = None
 
     def reset_calibration(self) -> None:
         self.hours = [_empty_hour() for _ in range(24)]
+        self.sky = _empty_sky()
         self.glob = {"a": 0.0, "r": 0.0, "n": 0}
         self.since: str | None = None
 
@@ -108,13 +164,15 @@ class SolarForecast:
             reason = f": {js.get('reason')}" if isinstance(js, dict) and js.get("reason") else ""
             raise ValueError(f"Invalid forecast answer{reason}")
         temps = h.get("temperature_2m") if isinstance(h.get("temperature_2m"), list) else []
+        clouds = h.get("cloud_cover") if isinstance(h.get("cloud_cover"), list) else []
         out = []
         for i, ts in enumerate(h["time"]):
             gti = h["global_tilted_irradiance"][i] if i < len(h["global_tilted_irradiance"]) else None
             if not isinstance(ts, (int, float)) or not isinstance(gti, (int, float)):
                 continue
             temp = temps[i] if i < len(temps) and isinstance(temps[i], (int, float)) else None
-            out.append({"t": ts - HOUR_S, "gti": max(0.0, float(gti)), "temp": temp})
+            cloud = clouds[i] if i < len(clouds) and isinstance(clouds[i], (int, float)) else None
+            out.append({"t": ts - HOUR_S, "gti": max(0.0, float(gti)), "temp": temp, "cloud": cloud})
         if not out:
             raise ValueError("Empty forecast answer")
         return out
@@ -141,32 +199,37 @@ class SolarForecast:
         g = self.glob
         return clamp(g["a"] / g["r"], FACTOR_MIN, FACTOR_MAX) if g["n"] > 0 and g["r"] > 0 else 1.0
 
-    def factor(self, hour: int) -> float:
-        g = self.global_factor()
-        h = self.hours[hour]
-        if not h or not h["n"] or not h["r"] > 0:
-            return g
-        own = clamp(h["a"] / h["r"], FACTOR_MIN, FACTOR_MAX)
-        w = min(1, h["days"] / HOUR_FULL_DAYS)
-        return w * own + (1 - w) * g
+    @staticmethod
+    def _blend(acc: dict[str, Any] | None, base: float) -> float:
+        if not acc or not acc["n"] or not acc["r"] > 0:
+            return base
+        own = clamp(acc["a"] / acc["r"], FACTOR_MIN, FACTOR_MAX)
+        w = min(1, acc["days"] / HOUR_FULL_DAYS)
+        return w * own + (1 - w) * base
+
+    def factor(self, hour: int, sky: int | None = None) -> float:
+        f = self._blend(self.hours[hour], self.global_factor())
+        return f if sky is None else self._blend(self.sky[hour][sky], f)
 
     def energy(self, entry: dict[str, Any], ctx: dict[str, Any]) -> float:
         raw = self.raw(entry, ctx["peak_kw"])
         if not raw:
             return 0.0
-        e = raw * self.factor(local_parts(entry["t"], ctx["tz"])["hour"])
+        e = raw * self.factor(local_parts(entry["t"], ctx["tz"])["hour"], sky_class(entry))
         return min(e, ctx["rated_kw"]) if ctx["rated_kw"] > 0 else e
 
     # ---------- Results ----------
 
-    def covers(self, day: str, tz: str) -> bool:
-        return sum(1 for e in self.series if local_parts(e["t"], tz)["day"] == day) >= 20
+    def covers(self, day: str, tz: str, series: list[dict[str, Any]] | None = None) -> bool:
+        return sum(1 for e in (self.series if series is None else series) if local_parts(e["t"], tz)["day"] == day) >= 20
 
-    def window(self, day: str, start_min: int, end_min: int, ctx: dict[str, Any]) -> float | None:
-        if not self.covers(day, ctx["tz"]):
+    def window(self, day: str, start_min: int, end_min: int, ctx: dict[str, Any],
+               series: list[dict[str, Any]] | None = None) -> float | None:
+        series = self.series if series is None else series
+        if not self.covers(day, ctx["tz"], series):
             return None
         total = 0.0
-        for e in self.series:
+        for e in series:
             p = local_parts(e["t"], ctx["tz"])
             if p["day"] != day:
                 continue
@@ -176,10 +239,17 @@ class SolarForecast:
                 total += self.energy(e, ctx) * ((to - frm) / 60)
         return total
 
-    def day_total(self, day: str, ctx: dict[str, Any]) -> float | None:
-        return self.window(day, 0, 24 * 60, ctx)
+    def day_total(self, day: str, ctx: dict[str, Any], series: list[dict[str, Any]] | None = None) -> float | None:
+        return self.window(day, 0, 24 * 60, ctx, series)
 
-    def remaining(self, now: float, ctx: dict[str, Any]) -> float | None:
+    @staticmethod
+    def correction(ratio: float | None, hours_ahead: float) -> float:
+        """Intraday correction for an hour starting hours_ahead from now (1 = none)."""
+        if ratio is None:
+            return 1.0
+        return 1 + (ratio - 1) * 0.5 ** (max(0.0, hours_ahead) / INTRADAY_HALF_LIFE_H)
+
+    def remaining(self, now: float, ctx: dict[str, Any], ratio: float | None = None) -> float | None:
         today = local_parts(now, ctx["tz"])["day"]
         if not self.covers(today, ctx["tz"]):
             return None
@@ -188,12 +258,50 @@ class SolarForecast:
             if local_parts(e["t"], ctx["tz"])["day"] != today or e["t"] + HOUR_S <= now:
                 continue
             share = 1 if e["t"] >= now else (e["t"] + HOUR_S - now) / HOUR_S
-            total += self.energy(e, ctx) * share
+            e_kwh = self.energy(e, ctx) * self.correction(ratio, (e["t"] - now) / HOUR_S)
+            if ctx["rated_kw"] > 0:
+                e_kwh = min(e_kwh, ctx["rated_kw"])
+            total += e_kwh * share
         return total
 
-    def power_at(self, now: float, ctx: dict[str, Any]) -> float | None:
+    def power_at(self, now: float, ctx: dict[str, Any], ratio: float | None = None) -> float | None:
         e = self.entry_at(now)
-        return self.energy(e, ctx) * 1000 if e else None
+        if not e:
+            return None
+        p = self.energy(e, ctx) * self.correction(ratio, 0)
+        return (min(p, ctx["rated_kw"]) if ctx["rated_kw"] > 0 else p) * 1000
+
+    # ---------- Intraday correction ----------
+
+    def record_actual(self, hour_start: float, actual: float, ctx: dict[str, Any]) -> None:
+        """Energy measured over a completed hour of today (kept for the intraday correction)."""
+        day = local_parts(hour_start, ctx["tz"])["day"]
+        if self.today_actual.get("day") != day:
+            self.today_actual = {"day": day, "hours": {}}
+        self.today_actual["hours"][str(int(hour_start))] = round(max(0.0, actual), 3)
+
+    def intraday_ratio(self, now: float, ctx: dict[str, Any]) -> float | None:
+        """Measured / forecast energy over the last completed hours of today, or None if too little light."""
+        if self.today_actual.get("day") != local_parts(now, ctx["tz"])["day"]:
+            return None
+        done = sorted((int(k) for k in self.today_actual["hours"] if int(k) + HOUR_S <= now), reverse=True)
+        f_sum = a_sum = 0.0
+        used = 0
+        for hs in done:
+            e = next((x for x in self.series if x["t"] == hs), None)
+            if not e:
+                continue
+            f = self.energy(e, ctx)
+            if f <= 0:
+                continue
+            f_sum += f
+            a_sum += self.today_actual["hours"][str(hs)]
+            used += 1
+            if used >= INTRADAY_HOURS:
+                break
+        if f_sum < INTRADAY_MIN_KWH:
+            return None
+        return clamp(a_sum / f_sum, INTRADAY_MIN, INTRADAY_MAX)
 
     # ---------- Calibration ----------
 
@@ -205,30 +313,22 @@ class SolarForecast:
         day, hour = p["day"], p["hour"]
         raw = self.raw(e, ctx["peak_kw"])
         forecast = self.energy(e, ctx)
-        base = {"hour": hour, "raw": round(raw, 3), "forecast": round(forecast, 3)}
+        sky = sky_class(e)
+        base = {"hour": hour, "raw": round(raw, 3), "forecast": round(forecast, 3), "sky": None if sky is None else SKY_NAMES[sky]}
         if raw < LEARN_MIN_FRACTION * ctx["peak_kw"]:
             return {"learned": False, "reason": "low", **base}
-        if ctx["rated_kw"] > 0 and (raw * self.factor(hour) > CLIP_MARGIN * ctx["rated_kw"] or actual > CLIP_MARGIN * ctx["rated_kw"]):
+        if ctx["rated_kw"] > 0 and (raw * self.factor(hour, sky) > CLIP_MARGIN * ctx["rated_kw"] or actual > CLIP_MARGIN * ctx["rated_kw"]):
             return {"learned": False, "reason": "clipping", **base}
         ratio = actual / raw
         if not RATIO_MIN <= ratio <= RATIO_MAX:
             return {"learned": False, "reason": "outlier", **base}
-        h = self.hours[hour]
-        h["n"] += 1
-        a = max(1 / h["n"], HOUR_ALPHA_MIN)
-        h["a"] += a * (actual - h["a"])
-        h["r"] += a * (raw - h["r"])
-        if h["last"] != day:
-            h["days"] += 1
-            h["last"] = day
-        g = self.glob
-        g["n"] += 1
-        ag = max(1 / g["n"], GLOBAL_ALPHA_MIN)
-        g["a"] += ag * (actual - g["a"])
-        g["r"] += ag * (raw - g["r"])
+        _ema_update(self.hours[hour], actual, raw, HOUR_ALPHA_MIN, day)
+        if sky is not None:
+            _ema_update(self.sky[hour][sky], actual, raw, HOUR_ALPHA_MIN, day)
+        _ema_update(self.glob, actual, raw, GLOBAL_ALPHA_MIN)
         if not self.since:
             self.since = day
-        return {"learned": True, **base, "factor": round(self.factor(hour), 3)}
+        return {"learned": True, **base, "factor": round(self.factor(hour, sky), 3)}
 
     # ---------- Day-ahead accuracy ----------
 
@@ -246,13 +346,32 @@ class SolarForecast:
         if not actual >= ACCURACY_MIN_KWH:
             return {"forecast": fc, "actual": round(actual, 2), "error": None}
         err = ((fc - actual) / actual) * 100
-        acc = self.accuracy
-        acc["days"] += 1
-        a = max(1 / acc["days"], ACCURACY_ALPHA_MIN)
-        acc["mape"] = abs(err) if acc["mape"] is None else acc["mape"] + a * (abs(err) - acc["mape"])
-        acc["bias"] = err if acc["bias"] is None else acc["bias"] + a * (err - acc["bias"])
-        acc["last"] = day
+        _accuracy_update(self.accuracy, err)
+        self.accuracy["last"] = day
         return {"forecast": fc, "actual": round(actual, 2), "error": round(err, 1)}
+
+    # ---------- Weather model comparison ----------
+
+    def record_model_ahead(self, model: str, day: str, kwh: float | None) -> None:
+        if not isinstance(kwh, (int, float)):
+            return
+        m = self.models.setdefault(model, _empty_model())
+        m["ahead"][day] = round(kwh, 2)
+        for k in sorted(m["ahead"])[:-3]:
+            del m["ahead"][k]
+
+    def check_models(self, day: str, actual: float) -> list[dict[str, Any]]:
+        out = []
+        for name, m in sorted(self.models.items()):
+            fc = m["ahead"].pop(day, None)
+            if not isinstance(fc, (int, float)):
+                continue
+            err = None
+            if actual >= ACCURACY_MIN_KWH:
+                err = ((fc - actual) / actual) * 100
+                _accuracy_update(m, err)
+            out.append({"model": name, "forecast": fc, "error": None if err is None else round(err, 1)})
+        return out
 
     # ---------- Summary and persistence ----------
 
@@ -263,6 +382,16 @@ class SolarForecast:
             "samples": self.glob["n"],
             "global_factor": round(self.global_factor(), 3),
             "hours": [{"hour": i, "days": h["days"], "factor": round(self.factor(i), 2) if h["n"] else None} for i, h in enumerate(self.hours) if h["days"] > 0],
+            "sky_factors": [
+                {"hour": i, **{SKY_NAMES[c]: {"days": self.sky[i][c]["days"], "factor": round(self.factor(i, c), 2)}
+                               for c in range(len(SKY_NAMES)) if self.sky[i][c]["days"] > 0}}
+                for i in range(24) if any(self.sky[i][c]["days"] > 0 for c in range(len(SKY_NAMES)))
+            ],
+            "models": {
+                k: {"days": m["days"], "mape": None if m["mape"] is None else round(m["mape"], 1),
+                    "bias": None if m["bias"] is None else round(m["bias"], 1)}
+                for k, m in sorted(self.models.items())
+            },
             "accuracy": {
                 "days": self.accuracy["days"],
                 "mape": None if self.accuracy["mape"] is None else round(self.accuracy["mape"], 1),
@@ -278,12 +407,21 @@ class SolarForecast:
             "fetchedAt": self.fetched_at,
             "hours": [{**h, "a": r(h["a"]), "r": r(h["r"])} for h in self.hours],
             "global": {**self.glob, "a": r(self.glob["a"]), "r": r(self.glob["r"])},
+            "sky": [[{**c, "a": r(c["a"]), "r": r(c["r"])} for c in h] for h in self.sky],
+            "todayActual": self.today_actual,
+            "models": self.models,
+            "compareDone": self.compare_done,
             "accuracy": self.accuracy,
             "dayAhead": self.day_ahead,
-            "series": [{"t": e["t"], "gti": round(e["gti"], 1), "temp": e["temp"]} for e in self.series],
+            "series": [{"t": e["t"], "gti": round(e["gti"], 1), "temp": e["temp"], "cloud": e.get("cloud")} for e in self.series],
         }
 
 
+def _empty_model() -> dict[str, Any]:
+    return {"ahead": {}, "days": 0, "mape": None, "bias": None}
+
+
+COMPARE_MODELS = ["meteofrance_seamless", "icon_seamless", "ecmwf_ifs025"]
 MODELS = ["best_match", "meteofrance_seamless", "icon_seamless", "ecmwf_ifs025", "gfs_seamless"]
 
 
@@ -292,7 +430,7 @@ def build_url(lat: float, lon: float, tilt: float, azimuth: float, model: str = 
     params = {
         "latitude": f"{round(lat, 2):.2f}",
         "longitude": f"{round(lon, 2):.2f}",
-        "hourly": "global_tilted_irradiance,temperature_2m",
+        "hourly": "global_tilted_irradiance,temperature_2m,cloud_cover",
         "tilt": str(int(min(90, max(0, tilt or 0)))),
         # Open-Meteo: 0 = south, -90 = east, 90 = west (compass bearing 180 = south)
         "azimuth": str(int(((((azimuth or 0) - 180) % 360) + 540) % 360 - 180)),
